@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { motion } from "framer-motion";
 import { TETROMINOES, getRandomTetromino } from "../tetrominoes";
 
 const ROWS = 20;
@@ -54,46 +55,51 @@ function rotateMatrix(matrix) {
   return matrix[0].map((_, i) => matrix.map((row) => row[i]).reverse());
 }
 
+function checkFullRows(grid) {
+  const fullRows = [];
+  grid.forEach((row, idx) => {
+    if (row.every((cell) => cell !== null)) fullRows.push(idx);
+  });
+  return fullRows;
+}
+
 export default function TetrisBoard() {
-  const [grid, setGrid] = useState(() => createEmptyGrid());
-  const [currentPiece, setCurrentPiece] = useState(() => getRandomTetromino());
-  const [position, setPosition] = useState(() => ({
+  const [grid, setGrid] = useState(createEmptyGrid());
+  const [currentPiece, setCurrentPiece] = useState(getRandomTetromino());
+  const [position, setPosition] = useState({
     row: 0,
     col: Math.floor(COLS / 2) - Math.floor(currentPiece.matrix[0].length / 2),
-  }));
+  });
+  const [score, setScore] = useState(0);
+  const [rowsToClear, setRowsToClear] = useState([]);
 
-  // Tick automatico
+  // caduta automatica
   useEffect(() => {
-    const interval = setInterval(() => {
-      movePiece({ row: 1, col: 0 });
-    }, TICK_INTERVAL);
+    const interval = setInterval(
+      () => movePiece({ row: 1, col: 0 }),
+      TICK_INTERVAL
+    );
     return () => clearInterval(interval);
   }, [grid, currentPiece, position]);
 
-  // Event listener tastiera
+  // gestione tastiera
   useEffect(() => {
     const handleKey = (e) => {
       switch (e.key) {
         case "ArrowLeft":
-        case "ArrowRight":
-        case "ArrowDown":
-        case "ArrowUp":
-          e.preventDefault(); // evita lo scroll della pagina
-          break;
-        default:
-          break;
-      }
-      switch (e.key) {
-        case "ArrowLeft":
+          e.preventDefault();
           movePiece({ row: 0, col: -1 });
           break;
         case "ArrowRight":
+          e.preventDefault();
           movePiece({ row: 0, col: 1 });
           break;
         case "ArrowDown":
+          e.preventDefault();
           movePiece({ row: 1, col: 0 });
           break;
         case "ArrowUp":
+          e.preventDefault();
           rotatePiece();
           break;
         default:
@@ -109,8 +115,27 @@ export default function TetrisBoard() {
     if (!isCollision(grid, currentPiece, newPos)) {
       setPosition(newPos);
     } else if (dr === 1 && dc === 0) {
-      // collisione verso il basso → fissiamo pezzo e spawn nuovo
-      setGrid((prev) => overlayPiece(prev, currentPiece, position));
+      const merged = overlayPiece(grid, currentPiece, position);
+      const fullRows = checkFullRows(merged);
+
+      if (fullRows.length > 0) {
+        setRowsToClear(fullRows); // trigger animazione flash/glow
+
+        setTimeout(() => {
+          // elimina le righe e fa scendere quelle sopra
+          let newGrid = merged.filter((_, idx) => !fullRows.includes(idx));
+          const emptyRows = Array.from({ length: fullRows.length }, () =>
+            Array(COLS).fill(null)
+          );
+          newGrid = [...emptyRows, ...newGrid];
+          setGrid(newGrid);
+          setScore((prev) => prev + fullRows.length * 100);
+          setRowsToClear([]);
+        }, 300); // durata animazione
+      } else {
+        setGrid(merged);
+      }
+
       const nextPiece = getRandomTetromino();
       setCurrentPiece(nextPiece);
       setPosition({
@@ -125,9 +150,7 @@ export default function TetrisBoard() {
       ...currentPiece,
       matrix: rotateMatrix(currentPiece.matrix),
     };
-    if (!isCollision(grid, rotated, position)) {
-      setCurrentPiece(rotated);
-    }
+    if (!isCollision(grid, rotated, position)) setCurrentPiece(rotated);
   };
 
   const displayGrid = useMemo(
@@ -136,9 +159,10 @@ export default function TetrisBoard() {
   );
 
   return (
-    <div className="flex justify-center items-center min-h-screen p-0">
+    <div className="flex flex-col items-center justify-center h-screen p-4">
+      <h1 className="text-white text-xl mb-4">Score: {score}</h1>
       <div
-        className="grid p-1"
+        className="grid"
         style={{
           gridTemplateColumns: `repeat(${COLS}, 24px)`,
           gridTemplateRows: `repeat(${ROWS}, 24px)`,
@@ -146,11 +170,22 @@ export default function TetrisBoard() {
         }}
       >
         {displayGrid.flat().map((cell, idx) => {
-          const className = cell ? TETROMINOES[cell].cssClass : "bg-gray-800";
+          const rowIdx = Math.floor(idx / COLS);
+          let className = cell ? TETROMINOES[cell].cssClass : "bg-gray-800";
+
           return (
-            <div
+            <motion.div
               key={idx}
-              className={`w-full h-full ${className} border border-gray-700`}
+              className={`w-full h-full ${className} border border-gray-700 ${
+                rowsToClear.includes(rowIdx) ? "glow-cell" : ""
+              }`}
+              initial={{ opacity: 1 }}
+              animate={{
+                opacity: rowsToClear.includes(rowIdx) ? [1, 0.3, 1] : 1,
+              }}
+              transition={{
+                opacity: { times: [0, 0.5, 1], duration: 0.3 },
+              }}
             />
           );
         })}
