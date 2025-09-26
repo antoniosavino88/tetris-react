@@ -16,3 +16,37 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.tetromino-I {
+  background-color: #00f0f0;
+}
+.tetromino-O {
+  background-color: #f0f000;
+}
+.tetromino-T {
+  background-color: #a000f0;
+}
+.tetromino-L {
+  background-color: #f0a000;
+}
+.tetromino-J {
+  background-color: #0000f0;
+}
+.tetromino-S {
+  background-color: #00f000;
+}
+.tetromino-Z {
+  background-color: #f00000;
+}
+
+/* bordo interno per definire le celle */
+.grid > div {
+  border-radius: 2px;
+}
