@@ -4,7 +4,6 @@ import { TETROMINOES, getRandomTetromino } from "../tetrominoes";
 
 const ROWS = 20;
 const COLS = 10;
-const TICK_INTERVAL = 500;
 
 function createEmptyGrid() {
   return Array.from({ length: ROWS }, () =>
@@ -70,17 +69,25 @@ export default function TetrisBoard() {
     row: 0,
     col: Math.floor(COLS / 2) - Math.floor(currentPiece.matrix[0].length / 2),
   });
+
   const [score, setScore] = useState(0);
   const [rowsToClear, setRowsToClear] = useState([]);
+
+  // 🔹 nuovo state per livelli e righe
+  const [level, setLevel] = useState(1);
+  const [linesCleared, setLinesCleared] = useState(0);
+
+  // 🔹 calcola velocità in base al livello
+  const getInterval = () => Math.max(100, 500 - (level - 1) * 50);
 
   // caduta automatica
   useEffect(() => {
     const interval = setInterval(
       () => movePiece({ row: 1, col: 0 }),
-      TICK_INTERVAL
+      getInterval()
     );
     return () => clearInterval(interval);
-  }, [grid, currentPiece, position]);
+  }, [grid, currentPiece, position, level]);
 
   // gestione tastiera
   useEffect(() => {
@@ -119,19 +126,28 @@ export default function TetrisBoard() {
       const fullRows = checkFullRows(merged);
 
       if (fullRows.length > 0) {
-        setRowsToClear(fullRows); // trigger animazione flash/glow
+        setRowsToClear(fullRows);
 
         setTimeout(() => {
-          // elimina le righe e fa scendere quelle sopra
           let newGrid = merged.filter((_, idx) => !fullRows.includes(idx));
           const emptyRows = Array.from({ length: fullRows.length }, () =>
             Array(COLS).fill(null)
           );
           newGrid = [...emptyRows, ...newGrid];
           setGrid(newGrid);
+
+          // aggiorna punteggio e righe eliminate
           setScore((prev) => prev + fullRows.length * 100);
+          setLinesCleared((prev) => {
+            const total = prev + fullRows.length;
+            if (total >= level * 10) {
+              setLevel((prevLevel) => prevLevel + 1);
+            }
+            return total;
+          });
+
           setRowsToClear([]);
-        }, 300); // durata animazione
+        }, 300);
       } else {
         setGrid(merged);
       }
@@ -160,7 +176,8 @@ export default function TetrisBoard() {
 
   return (
     <div className="flex flex-col items-center justify-center h-screen p-4">
-      <h1 className="text-white text-xl mb-4">Score: {score}</h1>
+      <h1 className="text-white text-xl mb-1">Score: {score}</h1>
+      <h2 className="text-white text-lg mb-4">Level: {level}</h2>
       <div
         className="grid"
         style={{
@@ -176,12 +193,10 @@ export default function TetrisBoard() {
           return (
             <motion.div
               key={idx}
-              className={`w-full h-full ${className} border border-gray-700 ${
-                rowsToClear.includes(rowIdx) ? "glow-cell" : ""
-              }`}
+              className={`w-full h-full ${className} border border-gray-700`}
               initial={{ opacity: 1 }}
               animate={{
-                opacity: rowsToClear.includes(rowIdx) ? [1, 0.3, 1] : 1,
+                opacity: rowsToClear.includes(rowIdx) ? [1, 0, 1] : 1,
               }}
               transition={{
                 opacity: { times: [0, 0.5, 1], duration: 0.3 },
