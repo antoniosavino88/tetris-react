@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { TETROMINOES, getRandomTetromino } from "../tetrominoes";
 
 const ROWS = 20;
@@ -122,8 +122,10 @@ export default function TetrisBoard() {
       const fullRows = checkFullRows(merged);
 
       if (fullRows.length > 0) {
+        // evidenzia le righe da cancellare (CSS anima il flash)
         setRowsToClear(fullRows);
 
+        // dopo l'animazione, rimuovi le righe e aggiorna stati
         setTimeout(() => {
           let newGrid = merged.filter((_, idx) => !fullRows.includes(idx));
           const emptyRows = Array.from({ length: fullRows.length }, () =>
@@ -179,38 +181,71 @@ export default function TetrisBoard() {
       </div>
 
       {/* CONTENUTO PRINCIPALE - Layout orizzontale con dimensioni fisse */}
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex flex-col items-center justify-center">
         {/* NEXT tetramino - Dimensione fissa a sinistra */}
         <div className="flex flex-col items-center text-white">
-          <h3 className="text-lg">Next</h3>
+          <h3 className="text-lg mb-2">Next</h3>
+
           <div
             className="flex items-center justify-center bg-gray-900 rounded-lg p-4"
-            style={{ width: "120px", height: "120px" }}
+            style={{ width: "80px", height: "80px" }}
           >
-            <div
-              className="grid"
-              style={{
-                gridTemplateColumns: `repeat(${nextPiece.matrix[0].length}, 18px)`,
-                gridTemplateRows: `repeat(${nextPiece.matrix.length}, 18px)`,
-                gap: "1px",
-              }}
-            >
-              {nextPiece.matrix.flat().map((cell, idx) => (
-                <div
-                  key={idx}
-                  className={`${
-                    cell ? TETROMINOES[nextPiece.type].cssClass : ""
-                  }`}
-                  style={{ width: "18px", height: "18px" }}
-                />
-              ))}
-            </div>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={nextPiece.type}
+                initial={{ opacity: 0, y: -12, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.96 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="grid w-full h-full"
+                style={{
+                  gridTemplateColumns: `repeat(4, 1fr)`,
+                  gridTemplateRows: `repeat(4, 1fr)`,
+                  gap: "4px",
+                  padding: "2px",
+                  boxSizing: "border-box",
+                }}
+              >
+                {Array.from({ length: 4 })
+                  .map((_, r) =>
+                    Array.from({ length: 4 }).map((_, c) => {
+                      const offsetRow = Math.floor(
+                        (4 - nextPiece.matrix.length) / 2
+                      );
+                      const offsetCol = Math.floor(
+                        (4 - nextPiece.matrix[0].length) / 2
+                      );
+                      const pieceRow = r - offsetRow;
+                      const pieceCol = c - offsetCol;
+                      const cellValue =
+                        pieceRow >= 0 &&
+                        pieceRow < nextPiece.matrix.length &&
+                        pieceCol >= 0 &&
+                        pieceCol < nextPiece.matrix[0].length
+                          ? nextPiece.matrix[pieceRow][pieceCol]
+                          : null;
+                      const cellClass = cellValue
+                        ? TETROMINOES[nextPiece.type].cssClass
+                        : "bg-gray-900";
+
+                      return (
+                        <div
+                          key={`${r}-${c}`}
+                          className={`${cellClass}`}
+                          style={{ width: "100%", height: "100%" }}
+                        />
+                      );
+                    })
+                  )
+                  .flat()}
+              </motion.div>
+            </AnimatePresence>
           </div>
         </div>
 
         {/* GRIGLIA principale - Centrata */}
         <div
-          className="grid"
+          className="grid mx-8"
           style={{
             gridTemplateColumns: `repeat(${COLS}, 24px)`,
             gridTemplateRows: `repeat(${ROWS}, 24px)`,
@@ -219,24 +254,16 @@ export default function TetrisBoard() {
         >
           {displayGrid.flat().map((cell, idx) => {
             const rowIdx = Math.floor(idx / COLS);
-            const flashAboveCount = rowsToClear.filter(
-              (r) => r < rowIdx
-            ).length;
-            let className = cell ? TETROMINOES[cell].cssClass : "bg-gray-800";
+            // non usiamo y animation per evitare "buco"
+            const className = cell ? TETROMINOES[cell].cssClass : "bg-gray-800";
+            const flash = rowsToClear.includes(rowIdx);
 
             return (
-              <motion.div
+              <div
                 key={idx}
-                className={`w-full h-full ${className} border border-gray-700`}
-                initial={{ y: 0, opacity: 1 }}
-                animate={{
-                  y: flashAboveCount * 24,
-                  opacity: rowsToClear.includes(rowIdx) ? [1, 0, 1] : 1,
-                }}
-                transition={{
-                  y: { type: "tween", duration: 0.2 },
-                  opacity: { times: [0, 0.5, 1], duration: 0.3 },
-                }}
+                className={`w-full h-full ${className} border border-gray-700 ${
+                  flash ? "flash-cell" : ""
+                }`}
               />
             );
           })}

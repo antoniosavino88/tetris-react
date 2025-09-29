@@ -51,12 +51,27 @@ body {
   border-radius: 2px;
 }
 
-.flash-cell {
-  background-color: white !important; /* forza il colore sopra i tetramini */
-  transition: background-color 0.2s ease-in-out;
-}
-
 .glow-cell {
   box-shadow: 0 0 10px white, 0 0 20px white;
   transition: box-shadow 0.3s ease-in-out;
+}
+
+/* flash visibile senza toccare il background-color delle classi tetromino */
+@keyframes tetris-flash {
+  0% {
+    filter: brightness(1);
+    box-shadow: none;
+  }
+  50% {
+    filter: brightness(1.8);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.85);
+  }
+  100% {
+    filter: brightness(1);
+    box-shadow: none;
+  }
+}
+
+.flash-cell {
+  animation: tetris-flash 300ms ease-in-out;
 }
