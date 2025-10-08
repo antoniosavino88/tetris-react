@@ -12,7 +12,7 @@ function createEmptyGrid() {
   );
 }
 
-function overlayPiece(grid, piece, position) {
+function overlayPiece(grid, piece, position, isGhost = false) {
   const copy = grid.map((row) => row.slice());
   const { matrix, type } = piece;
   for (let r = 0; r < matrix.length; r++) {
@@ -21,7 +21,7 @@ function overlayPiece(grid, piece, position) {
         const x = position.row + r;
         const y = position.col + c;
         if (x >= 0 && x < ROWS && y >= 0 && y < COLS) {
-          copy[x][y] = type;
+          copy[x][y] = isGhost ? `${type}-ghost` : type;
         }
       }
     }
@@ -75,6 +75,18 @@ export default function TetrisBoard() {
   const [level, setLevel] = useState(1);
   const [linesCleared, setLinesCleared] = useState(0);
   const [rowsToClear, setRowsToClear] = useState([]);
+  const [showGhost, setShowGhost] = useState(true);
+
+  // Calcola la posizione del ghost
+  const getGhostPosition = () => {
+    let ghostRow = position.row;
+    while (
+      !isCollision(grid, currentPiece, { row: ghostRow + 1, col: position.col })
+    ) {
+      ghostRow++;
+    }
+    return { row: ghostRow, col: position.col };
+  };
 
   // Caduta automatica
   useEffect(() => {
@@ -122,10 +134,7 @@ export default function TetrisBoard() {
       const fullRows = checkFullRows(merged);
 
       if (fullRows.length > 0) {
-        // evidenzia le righe da cancellare (CSS anima il flash)
         setRowsToClear(fullRows);
-
-        // dopo l'animazione, rimuovi le righe e aggiorna stati
         setTimeout(() => {
           let newGrid = merged.filter((_, idx) => !fullRows.includes(idx));
           const emptyRows = Array.from({ length: fullRows.length }, () =>
@@ -142,7 +151,6 @@ export default function TetrisBoard() {
             }
             return newTotal;
           });
-
           setRowsToClear([]);
         }, 300);
       } else {
@@ -167,10 +175,14 @@ export default function TetrisBoard() {
     if (!isCollision(grid, rotated, position)) setCurrentPiece(rotated);
   };
 
-  const displayGrid = useMemo(
-    () => overlayPiece(grid, currentPiece, position),
-    [grid, currentPiece, position]
-  );
+  const displayGrid = useMemo(() => {
+    let tempGrid = [...grid.map((r) => [...r])];
+    if (showGhost) {
+      const ghostPos = getGhostPosition();
+      tempGrid = overlayPiece(tempGrid, currentPiece, ghostPos, true);
+    }
+    return overlayPiece(tempGrid, currentPiece, position);
+  }, [grid, currentPiece, position, showGhost]);
 
   return (
     <div className="flex flex-col h-screen p-4">
@@ -178,11 +190,18 @@ export default function TetrisBoard() {
       <div className="flex flex-col items-center text-white text-xl">
         <h2 className="m-0">Score: {score}</h2>
         <h3 className="m-0">Level: {level}</h3>
+
+        <button
+          onClick={() => setShowGhost((prev) => !prev)}
+          className="mt-2 px-3 py-1 bg-gray-700 text-white rounded hover:bg-gray-600 transition"
+        >
+          Ghost: {showGhost ? "ON" : "OFF"}
+        </button>
       </div>
 
-      {/* CONTENUTO PRINCIPALE - Layout orizzontale con dimensioni fisse */}
+      {/* CONTENUTO PRINCIPALE */}
       <div className="flex flex-col items-center justify-center">
-        {/* NEXT tetramino - Dimensione fissa a sinistra */}
+        {/* NEXT */}
         <div className="flex flex-col items-center text-white">
           <h3 className="text-lg mb-2">Next</h3>
 
@@ -243,7 +262,7 @@ export default function TetrisBoard() {
           </div>
         </div>
 
-        {/* GRIGLIA principale - Centrata */}
+        {/* GRIGLIA principale */}
         <div
           className="grid mx-8"
           style={{
@@ -254,8 +273,17 @@ export default function TetrisBoard() {
         >
           {displayGrid.flat().map((cell, idx) => {
             const rowIdx = Math.floor(idx / COLS);
-            // non usiamo y animation per evitare "buco"
-            const className = cell ? TETROMINOES[cell].cssClass : "bg-gray-800";
+            let className = "bg-gray-800";
+
+            if (cell) {
+              if (cell.endsWith("-ghost")) {
+                const baseType = cell.replace("-ghost", "");
+                className = `${TETROMINOES[baseType].cssClass} opacity-30`;
+              } else {
+                className = TETROMINOES[cell].cssClass;
+              }
+            }
+
             const flash = rowsToClear.includes(rowIdx);
 
             return (
@@ -269,7 +297,7 @@ export default function TetrisBoard() {
           })}
         </div>
 
-        {/* SPAZIO vuoto a destra per bilanciare */}
+        {/* Spazio di bilanciamento */}
         <div style={{ width: "120px" }}></div>
       </div>
     </div>
