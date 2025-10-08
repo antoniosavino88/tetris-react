@@ -77,30 +77,85 @@ export default function TetrisBoard() {
   const [rowsToClear, setRowsToClear] = useState([]);
   const [showGhost, setShowGhost] = useState(true);
 
-  // Calcola la posizione del ghost
+  // --- Nuovi stati per controlli avanzati ---
+  const [softDrop, setSoftDrop] = useState(false);
+
+  // Calcola la posizione del ghost (riga più bassa valida)
   const getGhostPosition = () => {
     let ghostRow = position.row;
+    // avanzare finché non collide
     while (
       !isCollision(grid, currentPiece, { row: ghostRow + 1, col: position.col })
     ) {
       ghostRow++;
+      // sicurezza: non uscire dal campo
+      if (ghostRow > ROWS) break;
     }
     return { row: ghostRow, col: position.col };
   };
 
-  // Caduta automatica
+  // Funzione per bloccare il pezzo in una posizione (lock) e processare righe/punteggio
+  const lockPieceAt = (lockPos) => {
+    const merged = overlayPiece(grid, currentPiece, lockPos);
+    const fullRows = checkFullRows(merged);
+
+    if (fullRows.length > 0) {
+      setRowsToClear(fullRows);
+      setTimeout(() => {
+        let newGrid = merged.filter((_, idx) => !fullRows.includes(idx));
+        const emptyRows = Array.from({ length: fullRows.length }, () =>
+          Array(COLS).fill(null)
+        );
+        newGrid = [...emptyRows, ...newGrid];
+        setGrid(newGrid);
+
+        setScore((prev) => prev + fullRows.length * 100);
+        setLinesCleared((prev) => {
+          const newTotal = prev + fullRows.length;
+          if (newTotal >= level * 10) {
+            setLevel((l) => l + 1);
+          }
+          return newTotal;
+        });
+
+        setRowsToClear([]);
+      }, 300);
+    } else {
+      setGrid(merged);
+    }
+
+    // spawn nuovo pezzo dalla next
+    const next = nextPiece;
+    setCurrentPiece(next);
+    setNextPiece(getRandomTetromino());
+    setPosition({
+      row: 0,
+      col: Math.floor(COLS / 2) - Math.floor(next.matrix[0].length / 2),
+    });
+  };
+
+  // Hard drop: posiziona e lock immediatamente
+  const hardDrop = () => {
+    const ghostPos = getGhostPosition();
+    lockPieceAt(ghostPos);
+  };
+
+  // Caduta automatica (velocità influenzata dal livello e da softDrop)
   useEffect(() => {
+    const baseInterval = Math.max(TICK_INTERVAL - (level - 1) * 50, 100);
+    const intervalTime = softDrop ? 50 : baseInterval;
+
     const interval = setInterval(
       () => movePiece({ row: 1, col: 0 }),
-      Math.max(TICK_INTERVAL - (level - 1) * 50, 100)
+      intervalTime
     );
     return () => clearInterval(interval);
-  }, [grid, currentPiece, position, level]);
+  }, [grid, currentPiece, position, level, softDrop]);
 
-  // Gestione tastiera
+  // Gestione tastiera (keydown + keyup per softDrop)
   useEffect(() => {
-    const handleKey = (e) => {
-      switch (e.key) {
+    const handleKeyDown = (e) => {
+      switch (e.code) {
         case "ArrowLeft":
           e.preventDefault();
           movePiece({ row: 0, col: -1 });
@@ -111,72 +166,80 @@ export default function TetrisBoard() {
           break;
         case "ArrowDown":
           e.preventDefault();
+          // soft drop attivato finché tieni premuto
+          setSoftDrop(true);
+          // muovi subito una volta per risposta istantanea
           movePiece({ row: 1, col: 0 });
           break;
         case "ArrowUp":
           e.preventDefault();
           rotatePiece();
           break;
+        case "Space":
+        case "Spacebar":
+        case " ":
+          // hard drop
+          e.preventDefault();
+          hardDrop();
+          break;
         default:
           break;
       }
     };
-    window.addEventListener("keydown", handleKey, { passive: false });
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [currentPiece, position, grid]);
 
+    const handleKeyUp = (e) => {
+      if (e.code === "ArrowDown" || e.key === "ArrowDown") {
+        setSoftDrop(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown, { passive: false });
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, [currentPiece, position, grid, softDrop, nextPiece]); // dipendenze: re-attach se cambia il pezzo corrente
+
+  // Sposta o lock se collisione in basso
   const movePiece = ({ row: dr, col: dc }) => {
     const newPos = { row: position.row + dr, col: position.col + dc };
     if (!isCollision(grid, currentPiece, newPos)) {
       setPosition(newPos);
     } else if (dr === 1 && dc === 0) {
-      const merged = overlayPiece(grid, currentPiece, position);
-      const fullRows = checkFullRows(merged);
-
-      if (fullRows.length > 0) {
-        setRowsToClear(fullRows);
-        setTimeout(() => {
-          let newGrid = merged.filter((_, idx) => !fullRows.includes(idx));
-          const emptyRows = Array.from({ length: fullRows.length }, () =>
-            Array(COLS).fill(null)
-          );
-          newGrid = [...emptyRows, ...newGrid];
-          setGrid(newGrid);
-
-          setScore((prev) => prev + fullRows.length * 100);
-          setLinesCleared((prev) => {
-            const newTotal = prev + fullRows.length;
-            if (newTotal >= level * 10) {
-              setLevel((l) => l + 1);
-            }
-            return newTotal;
-          });
-          setRowsToClear([]);
-        }, 300);
-      } else {
-        setGrid(merged);
-      }
-
-      const next = nextPiece;
-      setCurrentPiece(next);
-      setNextPiece(getRandomTetromino());
-      setPosition({
-        row: 0,
-        col: Math.floor(COLS / 2) - Math.floor(next.matrix[0].length / 2),
-      });
+      // non possiamo scendere: lock nella posizione corrente
+      lockPieceAt(position);
     }
   };
 
+  // Ruota con wall-kicks base
   const rotatePiece = () => {
-    const rotated = {
-      ...currentPiece,
-      matrix: rotateMatrix(currentPiece.matrix),
-    };
-    if (!isCollision(grid, rotated, position)) setCurrentPiece(rotated);
+    const rotatedMatrix = rotateMatrix(currentPiece.matrix);
+    const rotated = { ...currentPiece, matrix: rotatedMatrix };
+
+    // se non collide nella posizione attuale -> ok
+    if (!isCollision(grid, rotated, position)) {
+      setCurrentPiece(rotated);
+      return;
+    }
+
+    // semplice wall-kick: prova spostamenti laterali
+    const kicks = [-1, 1, -2, 2];
+    for (let k of kicks) {
+      const tryPos = { row: position.row, col: position.col + k };
+      if (!isCollision(grid, rotated, tryPos)) {
+        setPosition(tryPos);
+        setCurrentPiece(rotated);
+        return;
+      }
+    }
+
+    // non ruota se tutte le prove falliscono
   };
 
+  // displayGrid include ghost (se attivo) e il pezzo corrente
   const displayGrid = useMemo(() => {
-    let tempGrid = [...grid.map((r) => [...r])];
+    let tempGrid = grid.map((r) => [...r]);
     if (showGhost) {
       const ghostPos = getGhostPosition();
       tempGrid = overlayPiece(tempGrid, currentPiece, ghostPos, true);
@@ -276,7 +339,7 @@ export default function TetrisBoard() {
             let className = "bg-gray-800";
 
             if (cell) {
-              if (cell.endsWith("-ghost")) {
+              if (typeof cell === "string" && cell.endsWith("-ghost")) {
                 const baseType = cell.replace("-ghost", "");
                 className = `${TETROMINOES[baseType].cssClass} opacity-30`;
               } else {
