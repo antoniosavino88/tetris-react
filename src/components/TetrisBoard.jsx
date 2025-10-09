@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { TETROMINOES, getRandomTetromino } from "../tetrominoes";
 
@@ -76,31 +76,63 @@ export default function TetrisBoard() {
   const [linesCleared, setLinesCleared] = useState(0);
   const [rowsToClear, setRowsToClear] = useState([]);
   const [showGhost, setShowGhost] = useState(true);
-
-  // --- Nuovi stati per controlli avanzati ---
   const [softDrop, setSoftDrop] = useState(false);
 
-  // Calcola la posizione del ghost (riga più bassa valida)
+  // --- 🔥 Stati per combo e feedback ---
+  const [comboCount, setComboCount] = useState(0);
+  const [lastClearTime, setLastClearTime] = useState(0);
+  // comboMessage is an object { id:number, text:string } or null
+  const [comboMessage, setComboMessage] = useState(null);
+
+  // Refs to keep freshest values in timeouts/closures
+  const comboRef = useRef(comboCount);
+  const lastClearRef = useRef(lastClearTime);
+
+  // keep refs in sync with state
+  useEffect(() => {
+    comboRef.current = comboCount;
+  }, [comboCount]);
+  useEffect(() => {
+    lastClearRef.current = lastClearTime;
+  }, [lastClearTime]);
+
+  // Calcola la posizione del ghost
   const getGhostPosition = () => {
     let ghostRow = position.row;
-    // avanzare finché non collide
     while (
       !isCollision(grid, currentPiece, { row: ghostRow + 1, col: position.col })
     ) {
       ghostRow++;
-      // sicurezza: non uscire dal campo
       if (ghostRow > ROWS) break;
     }
     return { row: ghostRow, col: position.col };
   };
 
-  // Funzione per bloccare il pezzo in una posizione (lock) e processare righe/punteggio
+  // --- 🧠 Logica punteggio avanzata + combo (calculate base points only) ---
+  const basePointsFor = (lines) => {
+    switch (lines) {
+      case 1:
+        return 100;
+      case 2:
+        return 300;
+      case 3:
+        return 500;
+      case 4:
+        return 800;
+      default:
+        return Math.max(0, 100 * lines);
+    }
+  };
+
+  // Blocca pezzo e processa righe/punteggio
   const lockPieceAt = (lockPos) => {
     const merged = overlayPiece(grid, currentPiece, lockPos);
     const fullRows = checkFullRows(merged);
 
     if (fullRows.length > 0) {
       setRowsToClear(fullRows);
+
+      // Manteniamo la logica di animazione righe -> poi aggiornamento griglia e punteggio
       setTimeout(() => {
         let newGrid = merged.filter((_, idx) => !fullRows.includes(idx));
         const emptyRows = Array.from({ length: fullRows.length }, () =>
@@ -109,7 +141,52 @@ export default function TetrisBoard() {
         newGrid = [...emptyRows, ...newGrid];
         setGrid(newGrid);
 
-        setScore((prev) => prev + fullRows.length * 100);
+        // --- CALCOLO PUNTI E COMBO USANDO REF PER EVITARE CLOSURE STALE ---
+        const now = Date.now();
+        const prevLast = lastClearRef.current || 0;
+        const withinComboWindow = now - prevLast < 3000; // 3s window
+        const prevCombo = comboRef.current || 0;
+        const newCombo = withinComboWindow ? prevCombo + 1 : 1;
+
+        // base points
+        let points = basePointsFor(fullRows.length);
+
+        // combo bonus: +50 per step of combo (only if combo >1)
+        const comboBonus = newCombo > 1 ? newCombo * 50 : 0;
+
+        // perfect clear? check newGrid (dopo rimozione)
+        const isPerfectClear = newGrid.flat().every((cell) => cell === null);
+        if (isPerfectClear) {
+          points += 1200; // extra perfect clear bonus
+        }
+
+        const totalPoints = Math.floor(points + comboBonus);
+
+        // aggiorna score
+        setScore((prev) => prev + totalPoints);
+
+        // aggiorna combo state + refs
+        setComboCount(newCombo);
+        comboRef.current = newCombo;
+
+        setLastClearTime(now);
+        lastClearRef.current = now;
+
+        // setta messaggio unico per forzare montaggio AnimatePresence
+        let messageText = null;
+        if (isPerfectClear) {
+          messageText = "✨ Perfect Clear! ✨";
+        } else if (fullRows.length === 4) {
+          messageText = `TETRIS! +${totalPoints}`;
+        } else if (newCombo > 1 || fullRows.length > 1) {
+          messageText = `Combo x${newCombo} (+${totalPoints})`;
+        }
+
+        if (messageText) {
+          setComboMessage({ id: now, text: messageText });
+        }
+
+        // lines/level
         setLinesCleared((prev) => {
           const newTotal = prev + fullRows.length;
           if (newTotal >= level * 10) {
@@ -121,10 +198,12 @@ export default function TetrisBoard() {
         setRowsToClear([]);
       }, 300);
     } else {
+      // no lines -> reset combo
+      setComboCount(0);
+      comboRef.current = 0;
       setGrid(merged);
     }
 
-    // spawn nuovo pezzo dalla next
     const next = nextPiece;
     setCurrentPiece(next);
     setNextPiece(getRandomTetromino());
@@ -134,17 +213,15 @@ export default function TetrisBoard() {
     });
   };
 
-  // Hard drop: posiziona e lock immediatamente
   const hardDrop = () => {
     const ghostPos = getGhostPosition();
     lockPieceAt(ghostPos);
   };
 
-  // Caduta automatica (velocità influenzata dal livello e da softDrop)
+  // Tick di gioco
   useEffect(() => {
     const baseInterval = Math.max(TICK_INTERVAL - (level - 1) * 50, 100);
     const intervalTime = softDrop ? 50 : baseInterval;
-
     const interval = setInterval(
       () => movePiece({ row: 1, col: 0 }),
       intervalTime
@@ -152,7 +229,7 @@ export default function TetrisBoard() {
     return () => clearInterval(interval);
   }, [grid, currentPiece, position, level, softDrop]);
 
-  // Gestione tastiera (keydown + keyup per softDrop)
+  // Tastiera
   useEffect(() => {
     const handleKeyDown = (e) => {
       switch (e.code) {
@@ -166,9 +243,7 @@ export default function TetrisBoard() {
           break;
         case "ArrowDown":
           e.preventDefault();
-          // soft drop attivato finché tieni premuto
           setSoftDrop(true);
-          // muovi subito una volta per risposta istantanea
           movePiece({ row: 1, col: 0 });
           break;
         case "ArrowUp":
@@ -178,7 +253,6 @@ export default function TetrisBoard() {
         case "Space":
         case "Spacebar":
         case " ":
-          // hard drop
           e.preventDefault();
           hardDrop();
           break;
@@ -188,9 +262,7 @@ export default function TetrisBoard() {
     };
 
     const handleKeyUp = (e) => {
-      if (e.code === "ArrowDown" || e.key === "ArrowDown") {
-        setSoftDrop(false);
-      }
+      if (e.code === "ArrowDown") setSoftDrop(false);
     };
 
     window.addEventListener("keydown", handleKeyDown, { passive: false });
@@ -199,31 +271,26 @@ export default function TetrisBoard() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     };
-  }, [currentPiece, position, grid, softDrop, nextPiece]); // dipendenze: re-attach se cambia il pezzo corrente
+  }, [currentPiece, position, grid, softDrop, nextPiece]);
 
-  // Sposta o lock se collisione in basso
+  // Movimento
   const movePiece = ({ row: dr, col: dc }) => {
     const newPos = { row: position.row + dr, col: position.col + dc };
     if (!isCollision(grid, currentPiece, newPos)) {
       setPosition(newPos);
     } else if (dr === 1 && dc === 0) {
-      // non possiamo scendere: lock nella posizione corrente
       lockPieceAt(position);
     }
   };
 
-  // Ruota con wall-kicks base
+  // Rotazione
   const rotatePiece = () => {
     const rotatedMatrix = rotateMatrix(currentPiece.matrix);
     const rotated = { ...currentPiece, matrix: rotatedMatrix };
-
-    // se non collide nella posizione attuale -> ok
     if (!isCollision(grid, rotated, position)) {
       setCurrentPiece(rotated);
       return;
     }
-
-    // semplice wall-kick: prova spostamenti laterali
     const kicks = [-1, 1, -2, 2];
     for (let k of kicks) {
       const tryPos = { row: position.row, col: position.col + k };
@@ -233,11 +300,9 @@ export default function TetrisBoard() {
         return;
       }
     }
-
-    // non ruota se tutte le prove falliscono
   };
 
-  // displayGrid include ghost (se attivo) e il pezzo corrente
+  // Display grid con ghost
   const displayGrid = useMemo(() => {
     let tempGrid = grid.map((r) => [...r]);
     if (showGhost) {
@@ -247,13 +312,20 @@ export default function TetrisBoard() {
     return overlayPiece(tempGrid, currentPiece, position);
   }, [grid, currentPiece, position, showGhost]);
 
+  // Rimuovi messaggio combo dopo poco (comboMessage is an object)
+  useEffect(() => {
+    if (comboMessage) {
+      const t = setTimeout(() => setComboMessage(null), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [comboMessage]);
+
   return (
-    <div className="flex flex-col h-screen p-4">
+    <div className="flex flex-col h-screen p-4 relative">
       {/* HEADER */}
       <div className="flex flex-col items-center text-white text-xl">
         <h2 className="m-0">Score: {score}</h2>
         <h3 className="m-0">Level: {level}</h3>
-
         <button
           onClick={() => setShowGhost((prev) => !prev)}
           className="mt-2 px-3 py-1 bg-gray-700 text-white rounded hover:bg-gray-600 transition"
@@ -261,6 +333,49 @@ export default function TetrisBoard() {
           Ghost: {showGhost ? "ON" : "OFF"}
         </button>
       </div>
+
+      {/* 🎇 Combo Visual (sempre visibile sopra tutto) */}
+      <AnimatePresence>
+        {comboMessage && (
+          <motion.div
+            key={comboMessage.id}
+            initial={{ opacity: 0, scale: 0.5, y: -30, rotate: -5 }}
+            animate={{
+              opacity: 1,
+              scale: [1.2, 1],
+              y: 0,
+              rotate: [0, 5, 0],
+              transition: {
+                duration: 0.6,
+                ease: "easeOut",
+                type: "spring",
+                stiffness: 120,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              scale: 0.8,
+              y: 40,
+              transition: { duration: 0.4, ease: "easeIn" },
+            }}
+            className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 
+                 text-6xl font-extrabold text-yellow-400 pointer-events-none select-none 
+                 z-[9999]"
+            style={{
+              textShadow:
+                "0 0 10px rgba(255,255,100,0.8), 0 0 20px rgba(255,255,0,0.5), 0 0 40px rgba(255,200,0,0.3)",
+            }}
+          >
+            <motion.span
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: [1.5, 1], opacity: 1 }}
+              transition={{ duration: 0.4, ease: "easeOut" }}
+            >
+              {comboMessage.text}
+            </motion.span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* CONTENUTO PRINCIPALE */}
       <div className="flex flex-col items-center justify-center">
@@ -337,7 +452,6 @@ export default function TetrisBoard() {
           {displayGrid.flat().map((cell, idx) => {
             const rowIdx = Math.floor(idx / COLS);
             let className = "bg-gray-800";
-
             if (cell) {
               if (typeof cell === "string" && cell.endsWith("-ghost")) {
                 const baseType = cell.replace("-ghost", "");
@@ -346,9 +460,7 @@ export default function TetrisBoard() {
                 className = TETROMINOES[cell].cssClass;
               }
             }
-
             const flash = rowsToClear.includes(rowIdx);
-
             return (
               <div
                 key={idx}
@@ -360,7 +472,6 @@ export default function TetrisBoard() {
           })}
         </div>
 
-        {/* Spazio di bilanciamento */}
         <div style={{ width: "120px" }}></div>
       </div>
     </div>
