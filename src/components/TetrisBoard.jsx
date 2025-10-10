@@ -78,25 +78,31 @@ export default function TetrisBoard() {
   const [showGhost, setShowGhost] = useState(true);
   const [softDrop, setSoftDrop] = useState(false);
 
-  // --- 🔥 Stati per combo e feedback ---
+  // combo & UI
   const [comboCount, setComboCount] = useState(0);
   const [lastClearTime, setLastClearTime] = useState(0);
-  // comboMessage is an object { id:number, text:string } or null
-  const [comboMessage, setComboMessage] = useState(null);
+  const [comboMessage, setComboMessage] = useState(null); // {id,text} or null
 
-  // Refs to keep freshest values in timeouts/closures
+  // animation key for Next (forces re-mount on each new nextPiece)
+  const [nextAnimKey, setNextAnimKey] = useState(Date.now());
+
+  // refs to avoid stale closures
   const comboRef = useRef(comboCount);
   const lastClearRef = useRef(lastClearTime);
+  const nextPieceRef = useRef(nextPiece);
 
-  // keep refs in sync with state
+  // sync refs with state
   useEffect(() => {
     comboRef.current = comboCount;
   }, [comboCount]);
   useEffect(() => {
     lastClearRef.current = lastClearTime;
   }, [lastClearTime]);
+  useEffect(() => {
+    nextPieceRef.current = nextPiece;
+  }, [nextPiece]);
 
-  // Calcola la posizione del ghost
+  // ghost position
   const getGhostPosition = () => {
     let ghostRow = position.row;
     while (
@@ -108,7 +114,6 @@ export default function TetrisBoard() {
     return { row: ghostRow, col: position.col };
   };
 
-  // --- 🧠 Logica punteggio avanzata + combo (calculate base points only) ---
   const basePointsFor = (lines) => {
     switch (lines) {
       case 1:
@@ -124,7 +129,6 @@ export default function TetrisBoard() {
     }
   };
 
-  // Blocca pezzo e processa righe/punteggio
   const lockPieceAt = (lockPos) => {
     const merged = overlayPiece(grid, currentPiece, lockPos);
     const fullRows = checkFullRows(merged);
@@ -132,7 +136,6 @@ export default function TetrisBoard() {
     if (fullRows.length > 0) {
       setRowsToClear(fullRows);
 
-      // Manteniamo la logica di animazione righe -> poi aggiornamento griglia e punteggio
       setTimeout(() => {
         let newGrid = merged.filter((_, idx) => !fullRows.includes(idx));
         const emptyRows = Array.from({ length: fullRows.length }, () =>
@@ -141,38 +144,25 @@ export default function TetrisBoard() {
         newGrid = [...emptyRows, ...newGrid];
         setGrid(newGrid);
 
-        // --- CALCOLO PUNTI E COMBO USANDO REF PER EVITARE CLOSURE STALE ---
         const now = Date.now();
         const prevLast = lastClearRef.current || 0;
-        const withinComboWindow = now - prevLast < 3000; // 3s window
+        const withinComboWindow = now - prevLast < 3000;
         const prevCombo = comboRef.current || 0;
         const newCombo = withinComboWindow ? prevCombo + 1 : 1;
 
-        // base points
         let points = basePointsFor(fullRows.length);
-
-        // combo bonus: +50 per step of combo (only if combo >1)
         const comboBonus = newCombo > 1 ? newCombo * 50 : 0;
-
-        // perfect clear? check newGrid (dopo rimozione)
         const isPerfectClear = newGrid.flat().every((cell) => cell === null);
-        if (isPerfectClear) {
-          points += 1200; // extra perfect clear bonus
-        }
+        if (isPerfectClear) points += 1200;
 
         const totalPoints = Math.floor(points + comboBonus);
+        setScore((p) => p + totalPoints);
 
-        // aggiorna score
-        setScore((prev) => prev + totalPoints);
-
-        // aggiorna combo state + refs
         setComboCount(newCombo);
         comboRef.current = newCombo;
-
         setLastClearTime(now);
         lastClearRef.current = now;
 
-        // setta messaggio unico per forzare montaggio AnimatePresence
         let messageText = null;
         if (isPerfectClear) {
           messageText = "✨ Perfect Clear! ✨";
@@ -186,27 +176,26 @@ export default function TetrisBoard() {
           setComboMessage({ id: now, text: messageText });
         }
 
-        // lines/level
         setLinesCleared((prev) => {
           const newTotal = prev + fullRows.length;
-          if (newTotal >= level * 10) {
-            setLevel((l) => l + 1);
-          }
+          if (newTotal >= level * 10) setLevel((l) => l + 1);
           return newTotal;
         });
 
         setRowsToClear([]);
       }, 300);
     } else {
-      // no lines -> reset combo
       setComboCount(0);
       comboRef.current = 0;
       setGrid(merged);
     }
 
-    const next = nextPiece;
+    // --- use the freshest nextPiece from ref, then generate a new next and update nextAnimKey
+    const next = nextPieceRef.current;
     setCurrentPiece(next);
-    setNextPiece(getRandomTetromino());
+    const generated = getRandomTetromino();
+    setNextPiece(generated);
+    setNextAnimKey(Date.now());
     setPosition({
       row: 0,
       col: Math.floor(COLS / 2) - Math.floor(next.matrix[0].length / 2),
@@ -218,7 +207,6 @@ export default function TetrisBoard() {
     lockPieceAt(ghostPos);
   };
 
-  // Tick di gioco
   useEffect(() => {
     const baseInterval = Math.max(TICK_INTERVAL - (level - 1) * 50, 100);
     const intervalTime = softDrop ? 50 : baseInterval;
@@ -229,7 +217,6 @@ export default function TetrisBoard() {
     return () => clearInterval(interval);
   }, [grid, currentPiece, position, level, softDrop]);
 
-  // Tastiera
   useEffect(() => {
     const handleKeyDown = (e) => {
       switch (e.code) {
@@ -260,11 +247,9 @@ export default function TetrisBoard() {
           break;
       }
     };
-
     const handleKeyUp = (e) => {
       if (e.code === "ArrowDown") setSoftDrop(false);
     };
-
     window.addEventListener("keydown", handleKeyDown, { passive: false });
     window.addEventListener("keyup", handleKeyUp);
     return () => {
@@ -273,17 +258,12 @@ export default function TetrisBoard() {
     };
   }, [currentPiece, position, grid, softDrop, nextPiece]);
 
-  // Movimento
   const movePiece = ({ row: dr, col: dc }) => {
     const newPos = { row: position.row + dr, col: position.col + dc };
-    if (!isCollision(grid, currentPiece, newPos)) {
-      setPosition(newPos);
-    } else if (dr === 1 && dc === 0) {
-      lockPieceAt(position);
-    }
+    if (!isCollision(grid, currentPiece, newPos)) setPosition(newPos);
+    else if (dr === 1 && dc === 0) lockPieceAt(position);
   };
 
-  // Rotazione
   const rotatePiece = () => {
     const rotatedMatrix = rotateMatrix(currentPiece.matrix);
     const rotated = { ...currentPiece, matrix: rotatedMatrix };
@@ -302,7 +282,6 @@ export default function TetrisBoard() {
     }
   };
 
-  // Display grid con ghost
   const displayGrid = useMemo(() => {
     let tempGrid = grid.map((r) => [...r]);
     if (showGhost) {
@@ -312,7 +291,7 @@ export default function TetrisBoard() {
     return overlayPiece(tempGrid, currentPiece, position);
   }, [grid, currentPiece, position, showGhost]);
 
-  // Rimuovi messaggio combo dopo poco (comboMessage is an object)
+  // remove combo message after short time
   useEffect(() => {
     if (comboMessage) {
       const t = setTimeout(() => setComboMessage(null), 1500);
@@ -327,49 +306,38 @@ export default function TetrisBoard() {
         <h2 className="m-0">Score: {score}</h2>
         <h3 className="m-0">Level: {level}</h3>
         <button
-          onClick={() => setShowGhost((prev) => !prev)}
+          onClick={() => setShowGhost((p) => !p)}
           className="mt-2 px-3 py-1 bg-gray-700 text-white rounded hover:bg-gray-600 transition"
         >
           Ghost: {showGhost ? "ON" : "OFF"}
         </button>
       </div>
 
-      {/* 🎇 Combo Visual (sempre visibile sopra tutto) */}
+      {/* Combo visual */}
       <AnimatePresence>
         {comboMessage && (
           <motion.div
             key={comboMessage.id}
-            initial={{ opacity: 0, scale: 0.5, y: -30, rotate: -5 }}
+            initial={{ opacity: 0, scale: 0.6, y: -30 }}
             animate={{
               opacity: 1,
               scale: [1.2, 1],
               y: 0,
-              rotate: [0, 5, 0],
-              transition: {
-                duration: 0.6,
-                ease: "easeOut",
-                type: "spring",
-                stiffness: 120,
-              },
+              transition: { duration: 0.5, type: "spring", stiffness: 200 },
             }}
             exit={{
               opacity: 0,
-              scale: 0.8,
-              y: 40,
-              transition: { duration: 0.4, ease: "easeIn" },
+              scale: 0.5,
+              y: 60,
+              transition: { duration: 0.45 },
             }}
-            className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 
-                 text-6xl font-extrabold text-yellow-400 pointer-events-none select-none 
-                 z-[9999]"
-            style={{
-              textShadow:
-                "0 0 10px rgba(255,255,100,0.8), 0 0 20px rgba(255,255,0,0.5), 0 0 40px rgba(255,200,0,0.3)",
-            }}
+            className="absolute top-1/4 left-1/3 inset-0 flex items-center justify-center pointer-events-none z-[9999]"
           >
             <motion.span
-              initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: [1.5, 1], opacity: 1 }}
-              transition={{ duration: 0.4, ease: "easeOut" }}
+              className="text-6xl font-extrabold text-yellow-400 select-none drop-shadow-lg"
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: [1.3, 1], opacity: 1 }}
+              transition={{ duration: 0.35 }}
             >
               {comboMessage.text}
             </motion.span>
@@ -377,19 +345,18 @@ export default function TetrisBoard() {
         )}
       </AnimatePresence>
 
-      {/* CONTENUTO PRINCIPALE */}
+      {/* MAIN */}
       <div className="flex flex-col items-center justify-center">
         {/* NEXT */}
         <div className="flex flex-col items-center text-white">
           <h3 className="text-lg mb-2">Next</h3>
-
           <div
             className="flex items-center justify-center bg-gray-900 rounded-lg p-4"
             style={{ width: "80px", height: "80px" }}
           >
             <AnimatePresence mode="wait">
               <motion.div
-                key={nextPiece.type}
+                key={nextAnimKey}
                 initial={{ opacity: 0, y: -12, scale: 0.96 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 12, scale: 0.96 }}
@@ -403,9 +370,9 @@ export default function TetrisBoard() {
                   boxSizing: "border-box",
                 }}
               >
-                {Array.from({ length: 4 })
-                  .map((_, r) =>
-                    Array.from({ length: 4 }).map((_, c) => {
+                {Array.from({ length: 4 }).map((_, r) =>
+                  Array.from({ length: 4 })
+                    .map((_, c) => {
                       const offsetRow = Math.floor(
                         (4 - nextPiece.matrix.length) / 2
                       );
@@ -424,7 +391,6 @@ export default function TetrisBoard() {
                       const cellClass = cellValue
                         ? TETROMINOES[nextPiece.type].cssClass
                         : "bg-gray-900";
-
                       return (
                         <div
                           key={`${r}-${c}`}
@@ -433,14 +399,14 @@ export default function TetrisBoard() {
                         />
                       );
                     })
-                  )
-                  .flat()}
+                    .flat()
+                )}
               </motion.div>
             </AnimatePresence>
           </div>
         </div>
 
-        {/* GRIGLIA principale */}
+        {/* GRID */}
         <div
           className="grid mx-8"
           style={{
