@@ -302,12 +302,13 @@ export default function TetrisBoard() {
   return (
     <div className="flex flex-col h-screen p-4 relative">
       {/* HEADER */}
-      <div className="flex flex-col items-center text-white text-xl">
+      <div className="flex flex-col items-center text-white" style={{ fontSize: "min(0.94rem, 2.25vh)" }}>
         <h2 className="m-0">Score: {score}</h2>
         <h3 className="m-0">Level: {level}</h3>
         <button
           onClick={() => setShowGhost((p) => !p)}
-          className="mt-2 px-3 py-1 bg-gray-700 text-white rounded hover:bg-gray-600 transition"
+          className="mt-1 px-3 py-1 bg-gray-700 text-white rounded hover:bg-gray-600 transition"
+          style={{ fontSize: "min(0.75rem, 1.87vh)", padding: "min(0.19rem, 0.75vh) min(0.56rem, 1.5vh)" }}
         >
           Ghost: {showGhost ? "ON" : "OFF"}
         </button>
@@ -349,10 +350,10 @@ export default function TetrisBoard() {
       <div className="flex flex-col items-center justify-center">
         {/* NEXT */}
         <div className="flex flex-col items-center text-white">
-          <h3 className="text-lg mb-2">Next</h3>
+          <h3 className="mb-1" style={{ fontSize: "min(0.85rem, 1.87vh)" }}>Next</h3>
           <div
-            className="flex items-center justify-center bg-gray-900 rounded-lg p-4"
-            style={{ width: "80px", height: "80px" }}
+            className="flex items-center justify-center bg-gray-900 rounded-lg p-2"
+            style={{ width: "min(70px, 10vh)", height: "min(70px, 10vh)" }}
           >
             <AnimatePresence mode="wait">
               <motion.div
@@ -410,8 +411,8 @@ export default function TetrisBoard() {
         <div
           className="grid mx-8"
           style={{
-            gridTemplateColumns: `repeat(${COLS}, 24px)`,
-            gridTemplateRows: `repeat(${ROWS}, 24px)`,
+            gridTemplateColumns: `repeat(${COLS}, min(30px, calc(50vh / ${ROWS})))`,
+            gridTemplateRows: `repeat(${ROWS}, min(30px, calc(50vh / ${ROWS})))`,
             gap: "1px",
           }}
         >
